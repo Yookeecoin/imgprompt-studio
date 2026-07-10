@@ -79,6 +79,9 @@
     <h2 style="margin-top:6px">3 · ช่วงเวลา / แสง</h2>
     <div class="chips" id="times"></div>
 
+    <h2 style="margin-top:6px">4 · สภาพอากาศ</h2>
+    <div class="chips" id="weather"></div>
+
     <label>โน้ตเพิ่มเติม (ไม่บังคับ)</label>
     <input id="note" type="text" placeholder="เช่น เปลี่ยนเป็นตอนเช้า, เพิ่มหิมะ, มุมมองจากด้านบน">
 
@@ -127,6 +130,16 @@ const TIMES = {
   "กลางคืน": "night scene, deep blue sky, artificial and window lights glowing warmly against the darkness, moody low-key lighting",
 };
 let timeOfDay = Object.keys(TIMES)[0];
+
+// สภาพอากาศ — ตัวแรก = ไม่เปลี่ยน
+const WEATHER = {
+  "อากาศตามต้นฉบับ": "",
+  "ฝนตกปรอยๆ": "light drizzle, fine mist of rain, soft wet sheen on every surface, gentle moody atmosphere",
+  "ฝนตกหนัก": "heavy rain, falling rain streaks, wet reflective ground with raindrop ripples in puddles, overcast grey sky, hazy rain atmosphere",
+  "หิมะตก": "snowfall, soft snowflakes drifting in the air, snow accumulating on surfaces and rooftops, cold wintry diffused light",
+  "หมอกลง": "thick morning fog, soft diffused light, distant objects fading into white mist, quiet mysterious atmosphere",
+};
+let weather = Object.keys(WEATHER)[0];
 
 // คำอธิบายละเอียดสำหรับ style ที่ชื่อสั้นไม่พอ — ถ้าไม่มีในนี้จะใช้ชื่อ chip ตรงๆ
 const STYLE_HINTS = {
@@ -190,6 +203,20 @@ Object.keys(TIMES).forEach((t, i) => {
   timesEl.appendChild(b);
 });
 
+// --- weather chips ---
+const weatherEl = $("weather");
+Object.keys(WEATHER).forEach((w, i) => {
+  const b = document.createElement("button");
+  b.className = "chip" + (i === 0 ? " on" : "");
+  b.textContent = w;
+  b.onclick = () => {
+    weather = w;
+    weatherEl.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+    b.classList.add("on");
+  };
+  weatherEl.appendChild(b);
+});
+
 // --- image load: resize to ≤1568px, jpeg, to keep tokens low ---
 function loadImage(file) {
   const img = new Image();
@@ -250,6 +277,8 @@ $("go").onclick = async () => {
     : `Re-imagine the image in this target style: ${STYLE_HINTS[style] || style}.`;
   const timeHint = TIMES[timeOfDay];
   const timeInstruction = timeHint ? ` Set the scene at this time of day / lighting: ${timeHint}.` : "";
+  const weatherHint = WEATHER[weather];
+  const weatherInstruction = weatherHint ? ` Weather in the scene: ${weatherHint}.` : "";
   const note = $("note").value.trim();
 
   try {
@@ -275,7 +304,7 @@ $("go").onclick = async () => {
         role: "user",
         content: [
           { type: "image", source: { type: "base64", ...imageData } },
-          { type: "text", text: `${styleInstruction}${timeInstruction}${note ? " Additional user notes: " + note : ""}` },
+          { type: "text", text: `${styleInstruction}${timeInstruction}${weatherInstruction}${note ? " Additional user notes: " + note : ""}` },
         ],
       }],
     });
