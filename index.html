@@ -63,7 +63,7 @@
 </head>
 <body>
 <h1>Image → <span>Prompt</span> Studio</h1>
-<p class="sub">โยนรูปเข้ามา เลือกสไตล์ แล้วรับ prompt คุณภาพสูงไปใช้กับ Midjourney / SD / Flux ได้เลย</p>
+<p class="sub">โยนรูปเข้ามา เลือกสไตล์ แล้วรับ prompt คุณภาพสูงไปใช้กับ Midjourney / SD / Flux — หรือสลับโหมด "วิดีโอ" เพื่อทำ motion prompt สำหรับ Kling / Veo / Runway</p>
 
 <div class="layout">
   <!-- LEFT -->
@@ -73,14 +73,19 @@
     <input id="file" type="file" accept="image/*" hidden>
     <img id="preview" alt="">
 
-    <h2 style="margin-top:18px">2 · สไตล์</h2>
-    <div class="chips" id="chips"></div>
+    <h2 style="margin-top:18px">2 · โหมด</h2>
+    <div class="chips" id="modes"></div>
 
-    <h2 style="margin-top:6px">3 · ช่วงเวลา / แสง</h2>
-    <div class="chips" id="times"></div>
+    <div id="imgOpts">
+      <h2 style="margin-top:6px">3 · สไตล์</h2>
+      <div class="chips" id="chips"></div>
 
-    <h2 style="margin-top:6px">4 · สภาพอากาศ</h2>
-    <div class="chips" id="weather"></div>
+      <h2 style="margin-top:6px">4 · ช่วงเวลา / แสง</h2>
+      <div class="chips" id="times"></div>
+
+      <h2 style="margin-top:6px">5 · สภาพอากาศ</h2>
+      <div class="chips" id="weather"></div>
+    </div>
 
     <label>โน้ตเพิ่มเติม (ไม่บังคับ)</label>
     <input id="note" type="text" placeholder="เช่น เปลี่ยนเป็นตอนเช้า, เพิ่มหิมะ, มุมมองจากด้านบน">
@@ -174,6 +179,28 @@ const STYLE_HINTS = {
 const $ = (id) => document.getElementById(id);
 let imageData = null; // { data: base64, media_type }
 let style = STYLES[0];
+
+// --- mode chips (ภาพนิ่ง / วิดีโอ i2v) ---
+const MODES = ["ภาพนิ่ง", "วิดีโอ (i2v)"];
+let mode = MODES[0];
+const NOTE_PLACEHOLDER = {
+  [MODES[0]]: "เช่น เปลี่ยนเป็นตอนเช้า, เพิ่มหิมะ, มุมมองจากด้านบน",
+  [MODES[1]]: "เช่น ให้ควันลอยชัดขึ้น, กล้อง pan ขวาช้าๆ, มีฟ้าแลบไกลๆ",
+};
+const modesEl = $("modes");
+MODES.forEach((m, i) => {
+  const b = document.createElement("button");
+  b.className = "chip" + (i === 0 ? " on" : "");
+  b.textContent = m;
+  b.onclick = () => {
+    mode = m;
+    modesEl.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+    b.classList.add("on");
+    $("imgOpts").style.display = m === MODES[0] ? "" : "none";
+    $("note").placeholder = NOTE_PLACEHOLDER[m];
+  };
+  modesEl.appendChild(b);
+});
 
 // --- style chips ---
 const chipsEl = $("chips");
@@ -272,6 +299,12 @@ $("go").onclick = async () => {
   status.textContent = "กำลังวิเคราะห์ภาพและสร้าง prompt…";
 
   const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
+  const note = $("note").value.trim();
+
+  const isVideo = mode === MODES[1];
+  const SYSTEM_IMAGE = "You are an expert prompt engineer for AI image generation (Midjourney, Stable Diffusion, Flux). Deconstruct the attached image into: subject, action/state, setting, lighting, composition/camera, and distinctive details. Then write ONE English text-to-image prompt as a single comma-separated paragraph, ordered from most to least important, that would recreate the image in the requested style. Do not spam quality keywords. Also write a matching negative prompt.";
+  const SYSTEM_VIDEO = "You are an expert motion-prompt engineer for image-to-video AI (Kling, Veo, Runway, Luma). The attached image will be animated. Analyze the scene and decide what should move: (1) ONE subtle camera movement only (slow push-in / slow pan / static), (2) subtle subject motion, (3) ambient motion (rain, steam, smoke, water ripples, swaying lights, flags), (4) lighting events (neon flicker, distant lightning, passing headlights). Write ONE English motion prompt UNDER 100 words, present tense, describing ONLY movement — do not re-describe the static scene or its art style (the model takes style from the image). End the prompt with: seamless loop, no scene change, consistent lighting. Also write a negative prompt (e.g. morphing, warping, distorted faces, distorted text, scene change, camera shake).";
+
   const styleInstruction = style === "ตามต้นฉบับ"
     ? "Keep the original style of the image."
     : `Re-imagine the image in this target style: ${STYLE_HINTS[style] || style}.`;
@@ -279,13 +312,15 @@ $("go").onclick = async () => {
   const timeInstruction = timeHint ? ` Set the scene at this time of day / lighting: ${timeHint}.` : "";
   const weatherHint = WEATHER[weather];
   const weatherInstruction = weatherHint ? ` Weather in the scene: ${weatherHint}.` : "";
-  const note = $("note").value.trim();
+  const userText = isVideo
+    ? `Create the motion prompt for animating this image.${note ? " Additional user notes: " + note : ""}`
+    : `${styleInstruction}${timeInstruction}${weatherInstruction}${note ? " Additional user notes: " + note : ""}`;
 
   try {
     const response = await client.messages.create({
       model: "claude-opus-4-8",
       max_tokens: 2048,
-      system: "You are an expert prompt engineer for AI image generation (Midjourney, Stable Diffusion, Flux). Deconstruct the attached image into: subject, action/state, setting, lighting, composition/camera, and distinctive details. Then write ONE English text-to-image prompt as a single comma-separated paragraph, ordered from most to least important, that would recreate the image in the requested style. Do not spam quality keywords. Also write a matching negative prompt.",
+      system: isVideo ? SYSTEM_VIDEO : SYSTEM_IMAGE,
       output_config: {
         format: {
           type: "json_schema",
@@ -304,7 +339,7 @@ $("go").onclick = async () => {
         role: "user",
         content: [
           { type: "image", source: { type: "base64", ...imageData } },
-          { type: "text", text: `${styleInstruction}${timeInstruction}${weatherInstruction}${note ? " Additional user notes: " + note : ""}` },
+          { type: "text", text: userText },
         ],
       }],
     });
