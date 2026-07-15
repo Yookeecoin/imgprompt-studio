@@ -412,6 +412,15 @@ Object.keys(SCALES).forEach((s, i) => {
 });
 
 async function upscale(blob, w, h) {
+  // ทางหลัก: Real-ESRGAN บน backend (คมกว่า) — ถ้าไม่มี/ล้ม fallback เป็น canvas
+  try {
+    const res = await fetch(`http://127.0.0.1:8000/upscale?w=${w}&h=${h}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: blob,
+    });
+    if (res.ok) return await res.blob();
+  } catch {}
   const bmp = await createImageBitmap(blob);
   const c = document.createElement("canvas");
   c.width = w; c.height = h;
@@ -448,7 +457,7 @@ $("gen").onclick = async () => {
     if (!res.ok) throw new Error(`backend ตอบ ${res.status}: ${await res.text()}`);
     let blob = await res.blob();
     if (outW !== width) {
-      gs.textContent = `กำลัง upscale เป็น ${outW}×${outH}…`;
+      gs.textContent = `กำลัง upscale (Real-ESRGAN) เป็น ${outW}×${outH}… (~10-40 วิ)`;
       blob = await upscale(blob, outW, outH);
     }
     const url = URL.createObjectURL(blob);
