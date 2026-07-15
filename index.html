@@ -120,6 +120,7 @@
       <div id="genStatus" style="font-size:13px;color:var(--muted);margin-top:10px;min-height:18px"></div>
       <img id="genResult" style="max-width:100%;border-radius:8px;display:none;margin-top:12px" alt="">
       <a id="genSave" download style="display:none;color:var(--accent2);font-size:13px;margin-top:8px">⬇︎ บันทึกภาพ</a>
+      <a id="genLofi" style="display:none;color:var(--accent2);font-size:13px;margin-top:8px;margin-left:14px;cursor:pointer">🎬 ทำวิดีโอ (lofi-motion)</a>
     </div>
   </div>
 </div>
@@ -371,6 +372,7 @@ $("go").onclick = async () => {
 
 // --- Bonsai local image gen (backend: bonsai-server บนเครื่อง, port 8000) ---
 const BONSAI_URL = "http://127.0.0.1:8000/generate";
+const LOFI_URL = "http://127.0.0.1:5050";   // lofi-motion (เว็บทำวิดีโอพารัลแลกซ์บนเครื่อง)
 // gen = ขนาดที่โมเดล gen จริง (~1MP, หาร 16 ลงตัว สัดส่วนตรงเป๊ะ), k2 = เป้า upscale (4K = k2 × 2)
 const SIZES = {
   "1:1 · 512² (เร็ว)": { gen: [512, 512], k2: [2048, 2048] },
@@ -431,6 +433,28 @@ async function upscale(blob, w, h) {
   return new Promise(r => c.toBlob(r, "image/png"));
 }
 
+// --- ส่งรูปที่ gen แล้วไปทำวิดีโอต่อใน lofi-motion (step ถัดไป: เลือกสไตล์วิดีโอที่นั่น) ---
+let lastGenBlob = null, lastGenName = "";
+$("genLofi").onclick = async () => {
+  const gs = $("genStatus");
+  gs.style.color = "";
+  try {
+    gs.textContent = "กำลังส่งรูปไป lofi-motion…";
+    const fd = new FormData();
+    fd.append("image", lastGenBlob, lastGenName);
+    const r = await fetch(LOFI_URL + "/upload", { method: "POST", body: fd });
+    if (!r.ok) throw new Error("lofi-motion ตอบ " + r.status);
+    const { image_id } = await r.json();
+    window.open(`${LOFI_URL}/?image_id=${image_id}`, "_blank");
+    gs.textContent = "ส่งแล้ว ✓ ไปเลือกสไตล์วิดีโอในแท็บ lofi-motion ได้เลย";
+  } catch (err) {
+    gs.textContent = err.message?.includes("Failed to fetch")
+      ? "ต่อ lofi-motion ไม่ได้ — เช็คว่า http://localhost:5050 เปิดอยู่"
+      : "ผิดพลาด: " + (err?.message || err);
+    gs.style.color = "#ff7a7a";
+  }
+};
+
 $("gen").onclick = async () => {
   const gs = $("genStatus");
   gs.style.color = "";
@@ -467,6 +491,9 @@ $("gen").onclick = async () => {
     save.href = url;
     save.download = `genimg-${seed}-${outW}x${outH}.png`;
     save.style.display = "inline-block";
+    lastGenBlob = blob;
+    lastGenName = save.download;
+    $("genLofi").style.display = "inline-block";
     gs.textContent = `เสร็จใน ${Math.round((Date.now() - t0) / 1000)}s ✓ · ${outW}×${outH} (seed ${seed})`;
   } catch (err) {
     gs.textContent = err.message?.includes("Failed to fetch")
