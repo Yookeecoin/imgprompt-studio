@@ -114,6 +114,8 @@
     <div id="bonsaiSec">
       <h2 style="margin-top:18px">Gen ภาพด้วย Bonsai (เครื่องเรา)</h2>
       <div class="chips" id="sizes"></div>
+      <label>ความละเอียด (2K/4K = gen ที่ ~1MP แล้ว upscale)</label>
+      <div class="chips" id="scales"></div>
       <button id="gen" style="width:100%;background:var(--accent2);color:#0a1220;border:0;border-radius:8px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">🖼️ Gen ภาพจาก Prompt นี้</button>
       <div id="genStatus" style="font-size:13px;color:var(--muted);margin-top:10px;min-height:18px"></div>
       <img id="genResult" style="max-width:100%;border-radius:8px;display:none;margin-top:12px" alt="">
@@ -369,9 +371,15 @@ $("go").onclick = async () => {
 
 // --- Bonsai local image gen (backend: bonsai-server บนเครื่อง, port 8000) ---
 const BONSAI_URL = "http://127.0.0.1:8000/generate";
+// gen = ขนาดที่โมเดล gen จริง (~1MP, หาร 16 ลงตัว สัดส่วนตรงเป๊ะ), k2 = เป้า upscale (4K = k2 × 2)
 const SIZES = {
-  "512²": [512, 512], "768²": [768, 768], "1024²": [1024, 1024],
-  "แนวนอน 1248×832": [1248, 832], "แนวตั้ง 832×1248": [832, 1248],
+  "1:1 · 512² (เร็ว)": { gen: [512, 512], k2: [2048, 2048] },
+  "1:1 · 1024²": { gen: [1024, 1024], k2: [2048, 2048] },
+  "4:5 · IG": { gen: [896, 1120], k2: [1080, 1350] },
+  "16:9 · YouTube": { gen: [1280, 720], k2: [1920, 1080] },
+  "9:16 · Story": { gen: [720, 1280], k2: [1080, 1920] },
+  "3:2 · แนวนอน": { gen: [1248, 832], k2: [1920, 1280] },
+  "2:3 · แนวตั้ง": { gen: [832, 1248], k2: [1280, 1920] },
 };
 let genSize = Object.values(SIZES)[0];
 const sizesEl = $("sizes");
@@ -387,13 +395,43 @@ Object.keys(SIZES).forEach((s, i) => {
   sizesEl.appendChild(b);
 });
 
+// --- resolution chips: มาตรฐาน / 2K / 4K ---
+const SCALES = { "มาตรฐาน (~1MP)": 0, "2K": 1, "4K": 2 };
+let genScale = 0;
+const scalesEl = $("scales");
+Object.keys(SCALES).forEach((s, i) => {
+  const b = document.createElement("button");
+  b.className = "chip" + (i === 0 ? " on" : "");
+  b.textContent = s;
+  b.onclick = () => {
+    genScale = SCALES[s];
+    scalesEl.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+    b.classList.add("on");
+  };
+  scalesEl.appendChild(b);
+});
+
+async function upscale(blob, w, h) {
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bmp, 0, 0, w, h);
+  return new Promise(r => c.toBlob(r, "image/png"));
+}
+
 $("gen").onclick = async () => {
   const gs = $("genStatus");
   gs.style.color = "";
   const promptText = $("prompt").textContent.trim();
   if (!promptText || promptText === "—") { gs.textContent = "สร้าง Prompt ก่อนครับ (ปุ่มส้มฝั่งซ้าย)"; gs.style.color = "#ff7a7a"; return; }
 
-  const [width, height] = genSize;
+  const [width, height] = genSize.gen;
+  const [outW, outH] = genScale === 0
+    ? [width, height]
+    : [genSize.k2[0] * genScale, genSize.k2[1] * genScale];
   const seed = Math.floor(Math.random() * 1e9);
   $("gen").disabled = true;
   const t0 = Date.now();
@@ -408,14 +446,19 @@ $("gen").onclick = async () => {
       body: JSON.stringify({ prompt: promptText, seed, steps: 4, width, height }),
     });
     if (!res.ok) throw new Error(`backend ตอบ ${res.status}: ${await res.text()}`);
-    const url = URL.createObjectURL(await res.blob());
+    let blob = await res.blob();
+    if (outW !== width) {
+      gs.textContent = `กำลัง upscale เป็น ${outW}×${outH}…`;
+      blob = await upscale(blob, outW, outH);
+    }
+    const url = URL.createObjectURL(blob);
     $("genResult").src = url;
     $("genResult").style.display = "block";
     const save = $("genSave");
     save.href = url;
-    save.download = `genimg-${seed}.png`;
+    save.download = `genimg-${seed}-${outW}x${outH}.png`;
     save.style.display = "inline-block";
-    gs.textContent = `เสร็จใน ${Math.round((Date.now() - t0) / 1000)}s ✓ (seed ${seed})`;
+    gs.textContent = `เสร็จใน ${Math.round((Date.now() - t0) / 1000)}s ✓ · ${outW}×${outH} (seed ${seed})`;
   } catch (err) {
     gs.textContent = err.message?.includes("Failed to fetch")
       ? "ต่อ backend ไม่ได้ — เปิด Terminal แล้วพิมพ์ bonsai-server ก่อนครับ"
