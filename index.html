@@ -110,6 +110,15 @@
       <button class="copy" data-for="negative">คัดลอก</button>
       <pre id="negative">—</pre>
     </div>
+
+    <div id="bonsaiSec">
+      <h2 style="margin-top:18px">Gen ภาพด้วย Bonsai (เครื่องเรา)</h2>
+      <div class="chips" id="sizes"></div>
+      <button id="gen" style="width:100%;background:var(--accent2);color:#0a1220;border:0;border-radius:8px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">🖼️ Gen ภาพจาก Prompt นี้</button>
+      <div id="genStatus" style="font-size:13px;color:var(--muted);margin-top:10px;min-height:18px"></div>
+      <img id="genResult" style="max-width:100%;border-radius:8px;display:none;margin-top:12px" alt="">
+      <a id="genSave" download style="display:none;color:var(--accent2);font-size:13px;margin-top:8px">⬇︎ บันทึกภาพ</a>
+    </div>
   </div>
 </div>
 
@@ -197,6 +206,7 @@ MODES.forEach((m, i) => {
     modesEl.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
     b.classList.add("on");
     $("imgOpts").style.display = m === MODES[0] ? "" : "none";
+    $("bonsaiSec").style.display = m === MODES[0] ? "" : "none";
     $("note").placeholder = NOTE_PLACEHOLDER[m];
   };
   modesEl.appendChild(b);
@@ -354,6 +364,66 @@ $("go").onclick = async () => {
     status.classList.add("err");
   } finally {
     $("go").disabled = false;
+  }
+};
+
+// --- Bonsai local image gen (backend: bonsai-server บนเครื่อง, port 8000) ---
+const BONSAI_URL = "http://127.0.0.1:8000/generate";
+const SIZES = {
+  "512²": [512, 512], "768²": [768, 768], "1024²": [1024, 1024],
+  "แนวนอน 1248×832": [1248, 832], "แนวตั้ง 832×1248": [832, 1248],
+};
+let genSize = Object.values(SIZES)[0];
+const sizesEl = $("sizes");
+Object.keys(SIZES).forEach((s, i) => {
+  const b = document.createElement("button");
+  b.className = "chip" + (i === 0 ? " on" : "");
+  b.textContent = s;
+  b.onclick = () => {
+    genSize = SIZES[s];
+    sizesEl.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+    b.classList.add("on");
+  };
+  sizesEl.appendChild(b);
+});
+
+$("gen").onclick = async () => {
+  const gs = $("genStatus");
+  gs.style.color = "";
+  const promptText = $("prompt").textContent.trim();
+  if (!promptText || promptText === "—") { gs.textContent = "สร้าง Prompt ก่อนครับ (ปุ่มส้มฝั่งซ้าย)"; gs.style.color = "#ff7a7a"; return; }
+
+  const [width, height] = genSize;
+  const seed = Math.floor(Math.random() * 1e9);
+  $("gen").disabled = true;
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    gs.textContent = `กำลัง gen… ${Math.round((Date.now() - t0) / 1000)}s (512²≈40วิ, 1024²≈2นาที บน M2)`;
+  }, 1000);
+
+  try {
+    const res = await fetch(BONSAI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: promptText, seed, steps: 4, width, height }),
+    });
+    if (!res.ok) throw new Error(`backend ตอบ ${res.status}: ${await res.text()}`);
+    const url = URL.createObjectURL(await res.blob());
+    $("genResult").src = url;
+    $("genResult").style.display = "block";
+    const save = $("genSave");
+    save.href = url;
+    save.download = `genimg-${seed}.png`;
+    save.style.display = "inline-block";
+    gs.textContent = `เสร็จใน ${Math.round((Date.now() - t0) / 1000)}s ✓ (seed ${seed})`;
+  } catch (err) {
+    gs.textContent = err.message?.includes("Failed to fetch")
+      ? "ต่อ backend ไม่ได้ — เปิด Terminal แล้วพิมพ์ bonsai-server ก่อนครับ"
+      : "ผิดพลาด: " + (err?.message || err);
+    gs.style.color = "#ff7a7a";
+  } finally {
+    clearInterval(tick);
+    $("gen").disabled = false;
   }
 };
 </script>
